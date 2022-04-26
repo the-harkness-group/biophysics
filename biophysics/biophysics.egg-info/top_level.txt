@@ -1,0 +1,6 @@
+calorimetry
+fitting
+hydrodynamics
+nmr
+plotting
+primers
