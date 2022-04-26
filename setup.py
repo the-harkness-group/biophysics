@@ -15,6 +15,6 @@ setuptools.setup(
         "Bug Tracker": "https://github.com/robharkness/biophysics/issues"
     },
     license='GNU GPL v3.0',
-    packages=['biophysics'],
+    packages=find_packages(),
     install_requires=['numpy','scipy','nmrglue','matplotlib','pyyaml','pandas'],
 )
