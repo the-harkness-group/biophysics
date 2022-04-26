@@ -1,8 +1,8 @@
-import setuptools
+from setuptools import find_packages, setup
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-setuptools.setup(
+setup(
     name="biophysics",
     version="0.2",
     author='Robert Harkness',
