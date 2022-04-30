@@ -22,6 +22,28 @@ def onesite(LT, PT, K):
     
     return PB
 
+def monomerdimer(PT, K):
+
+    concentrations = 0
+
+    return concentrations
+
+def monomerdimertrimer(PT, K1, K2):
+
+    concentrations = 0
+
+    return concentrations
+
+# Solve roots of binding  polynomial and return the real, positive root as the desired experimental concentration
+def solveroots(p, max_concentration):
+
+    r = np.roots(p)
+    for root in r:
+        if (np.isreal(root) == True) & (np.real(root) > 0) & (np.real(root) < max_concentration):
+            concentration = root
+
+    return concentration
+
 # Calculate K according to Ko (ref temperature), dHo, dCp
 def equilibriumconstants(Ko, dHo, dCp, To, Temperatures):
     
