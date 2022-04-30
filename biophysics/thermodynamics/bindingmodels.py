@@ -41,6 +41,12 @@ def solveroots(p, max_concentration):
     for root in r:
         if (np.isreal(root) == True) & (np.real(root) > 0) & (np.real(root) < max_concentration):
             concentration = root
+    
+    try:
+        concentration
+    except:
+        print('Concentration not defined, bad parameters! Returning zero.')
+        concentration = 0
 
     return concentration
 
