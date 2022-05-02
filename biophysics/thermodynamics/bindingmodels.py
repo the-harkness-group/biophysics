@@ -35,18 +35,15 @@ def monomerdimertrimer(PT, K1, K2):
     return concentrations
 
 # Solve roots of binding  polynomial and return the real, positive root as the desired experimental concentration
-def solveroots(p, max_concentration):
+def solveroots(p, max_concentration, concentration=None):
 
     r = np.roots(p)
     for root in r:
         if (np.isreal(root) == True) & (np.real(root) > 0) & (np.real(root) < max_concentration):
             concentration = root
-        
-    try:
-        concentration
-    except:
-        print('Concentration not defined, bad parameters! Returning zero.')
-        concentration = 0
+    
+    if concentration is None:
+        print('Concentration not defined, bad parameters! Returning None.')
 
     return concentration
 
