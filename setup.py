@@ -16,5 +16,5 @@ setup(
     },
     license='GNU GPL v3.0',
     packages=find_packages(),
-    install_requires=['numpy','scipy','nmrglue','matplotlib','pyyaml','pandas'],
+    install_requires=['numpy','scipy','nmrglue','matplotlib','pyyaml','pandas','lmfit'],
 )
