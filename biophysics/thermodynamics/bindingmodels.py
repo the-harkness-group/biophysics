@@ -39,7 +39,7 @@ def solveroots(p, max_concentration, concentration=None):
 
     r = np.roots(p)
     for root in r:
-        if (np.isreal(root) == True) & (np.real(root) > 0) & (np.real(root) < max_concentration):
+        if (np.isreal(root) == True) & (np.real(root) >= 0) & (np.real(root) < max_concentration):
             concentration = root
     
     if concentration is None:
