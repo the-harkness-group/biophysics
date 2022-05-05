@@ -43,7 +43,7 @@ def solveroots(p, max_concentration, concentration=None):
             concentration = root
     
     if concentration is None:
-        print('Concentration not defined, bad parameters! Returning None.')
+        raise ValueError('Concentration not defined, bad parameters! Returning None.')
 
     return concentration
 
