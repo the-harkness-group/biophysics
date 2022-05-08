@@ -12,8 +12,6 @@ import numpy as np
 # d/dt  [F] =   [-km1 k1]    [F]
 #       [U]     [km1 -k1]    [U]
 
-def rate_eqs(C0, t, params):
-    
-    R = params # Unpack relaxation matrix
+def rate_eqs(C0, t, R):
 
     return np.matmul(R,C0)
