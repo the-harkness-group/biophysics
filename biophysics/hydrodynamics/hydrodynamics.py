@@ -41,6 +41,17 @@ def scaled_diffusion(Do, size_multiple, exponent):
     
     return D_scaled
 
+# For self-assembly of monomers
+def monomer_diffusion_dictionary(P_dict):
+    
+    D_dict = P_dict.copy()
+    D_dict['size factor'] = np.array([int(k[1:]) for k in P_dict.keys()]) # For Dz calculation
+    D_dict['exponent'] = np.full(len(P_dict.keys()),-0.333) # Spherical scaling
+    D_dict['Dz'] = np.zeros(1)
+    
+    return D_dict
+
+# For self-assembly of trimers
 def make_diffusion_dictionary(P_dict):
     
     D_dict = P_dict.copy()
@@ -59,6 +70,18 @@ def calculate_Dz(D_dict, C_dict, temperature, eta_coeffs, Rho):
     Dz_den = 0
     eta = viscosity(temperature, eta_coeffs) # Get diffusion coeffs as a fxn of temperature
     Do = stokes_diffusion(temperature, eta, Rho)
+    for y, k in enumerate(C_dict.keys()): # C_dict stays same length
+        D_dict[k] = scaled_diffusion(Do, D_dict['size factor'][y], D_dict['exponent'][y])
+        Dz_num += (D_dict['size factor'][y]**2)*C_dict[k]*D_dict[k] # Diffusion
+        Dz_den += (D_dict['size factor'][y]**2)*C_dict[k]
+    D_dict['Dz'] = Dz_num/Dz_den
+    
+    return D_dict
+
+def calculate_Dz_isothermal(D_dict, C_dict, Do):
+    
+    Dz_num = 0 # Get Dz
+    Dz_den = 0
     for y, k in enumerate(C_dict.keys()): # C_dict stays same length
         D_dict[k] = scaled_diffusion(Do, D_dict['size factor'][y], D_dict['exponent'][y])
         Dz_num += (D_dict['size factor'][y]**2)*C_dict[k]*D_dict[k] # Diffusion

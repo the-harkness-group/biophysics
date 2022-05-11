@@ -22,12 +22,14 @@ def onesite(LT, PT, K):
     
     return PB
 
+# !!! Need to add these models
 def monomerdimer(PT, K):
 
     concentrations = 0
 
     return concentrations
 
+# !!!
 def monomerdimertrimer(PT, K1, K2):
 
     concentrations = 0

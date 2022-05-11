@@ -6,12 +6,12 @@ Created on Tue Mar  9 15:04:11 2021
 @author: harkness
 """
 
+import time
 import numpy as np
 import pickle
 import pandas as pd
-from lmfit import Parameters
-from lmfit import Model
-from lmfit import minimize
+from lmfit import Parameters, minimize, Model, report_fit
+import copy
 
 # Simple fits exploiting lmfit, e.g. for fitting an exponential
 def simple_fit(model, guess_params, x, y):
@@ -23,6 +23,61 @@ def simple_fit(model, guess_params, x, y):
     print(result.fit_report())
 
     return result
+
+def fit(fit_data, fit_params, fit_constants, wrapper_func, wrapper_args, observe, 
+        objective, error_iter, run_fit=True, get_errors=True):
+
+    if run_fit == True: # Fit data
+        start = time.time() # Calculate fit run time
+        result = minimize(objective, fit_params, method='nelder', args=(fit_data, 
+        wrapper_func, wrapper_args, observe))
+        finish = time.time()
+        print(f"\nThe elapsed fit time is {finish-start}s \n")
+        
+        # Print optimized parameters, write dataframe
+        report_fit(result)
+        print('The reduced RSS is:',(result.chisqr/(result.ndata-len(result.params.keys()))))
+        opt_params = copy.deepcopy(result.params)
+        save_dict = {'Parameter':[],'Value':[]}
+        for k,v in opt_params.items():
+            save_dict['Parameter'].append(k)
+            save_dict['Value'].append(v.value)
+        save_df = pd.DataFrame(save_dict)
+        save_df.to_csv('optimal_fit_params.csv')
+
+        if get_errors == True:
+            start = time.time()
+            # Calculate RMSD using fitting.objective since you need residuals! NOT SCALED RESIDUALS
+            residuals = np.array(objective(opt_params, fit_data, wrapper_func, wrapper_args, observe)) # For RMSD
+            RSS = np.sum(np.square(residuals))
+            RMSD = np.sqrt(RSS/result.ndata)
+            MC_dict, MC_errors = montecarloerrors(fit_data, opt_params, fit_constants, wrapper_func,
+            wrapper_args, observe, error_iter, RMSD=RMSD, MC_objective=objective)
+            finish = time.time()
+            print(f"\nThe total elapsed Monte-Carlo error iteration time is {finish-start}s\n")
+
+        if get_errors == False:
+            MC_dict = {}
+            MC_errors = {}
+
+    if run_fit == False: # Simulate data, if optimal parameters already known
+        if get_errors == True:
+            # Calculate RMSD using fitting.objective since you need residuals! NOT SCALED RESIDUALS
+            residuals = np.array(objective(fit_params, fit_data, wrapper_func, wrapper_args, observe)) # For RMSD
+            RSS = np.sum(np.square(residuals))
+            RMSD = np.sqrt(RSS/len(fit_data))
+
+            start = time.time()
+            MC_dict, MC_errors = montecarloerrors(fit_data, fit_params, fit_constants, wrapper_func,
+            wrapper_args, observe, error_iter, RMSD=RMSD, MC_objective=objective)
+            finish = time.time()
+            print(f"\nThe total elapsed Monte-Carlo error iteration time is {finish-start}s\n")
+ 
+        if get_errors == False:
+            MC_dict = {}
+            MC_errors = {}
+
+    return fit_params, MC_dict, MC_errors
 
 # Minimization function for more complex fitting fitting
 def objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
@@ -36,8 +91,7 @@ def objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
         
     return resid
 
-
-# Minimization function for fitting, scaled
+# Minimization function for fitting, scale residual,i by data,i
 def scaled_objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
 
     resid = []
@@ -50,9 +104,8 @@ def scaled_objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
         
     return resid
 
-
 # Generate errors by Monte Carlo analysis
-def MonteCarloErrors(fit_data, opt_params, fit_constants, wrapper_func,
+def montecarloerrors(fit_data, opt_params, fit_constants, wrapper_func,
     wrapper_args, observe, MC_iter, RMSD, MC_objective):
     
     perfect_data = fit_data.copy() # Make copy of dataframe
@@ -92,7 +145,6 @@ def MonteCarloErrors(fit_data, opt_params, fit_constants, wrapper_func,
         pickle.dump(MC_dict,f,protocol=pickle.HIGHEST_PROTOCOL)
     
     return MC_dict, errors
-
 
 ### CURRENTLY BROKEN !!! DOES NOT DO SEPARATE THINGS UP TO MAX PROCESSOR # IN PARALLEL, DOES MULTIPLE OF THE SAME THING ###
 
