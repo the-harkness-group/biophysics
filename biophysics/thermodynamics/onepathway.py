@@ -15,10 +15,12 @@ import scipy.optimize as opt
 def one_pathway(fit_params, fit_constants, temperature, concentration, P_dict, C_dict):
 
     # Get equilibrium constants
-    K1 = bindingmodels.equilibriumconstants(fit_params['K1o'].value,fit_params['dH1o'].value,
-            fit_params['dCp1'].value,fit_constants['To'],temperature)
+    #K1 = bindingmodels.equilibriumconstants(fit_params['K1o'].value,fit_params['dH1o'].value,
+    #fit_params['dCp1'].value,fit_constants['To'],temperature)
 
-    X_guess = 0.001*concentration*K1 # Initial guess for dimensionless monomer concentration
+    K1 = fit_params['K1o']
+
+    X_guess = 0.00001*concentration*K1 # Initial guess for dimensionless monomer concentration
     ################## Solve dimensionless monomer concentration ##################
     constants = concentration*K1 # XT
     equations_partial = partial(equations,constants)

@@ -17,7 +17,7 @@ import numpy as np
 # Requires a function func where the relaxation matrix is defined
 # This propagation could also be done with a matrix exponential as in NMR analyses
 
-def propagator(C, t, constants, func):
+def propagator(t, C, func, constants): # solve_ivp 
 
     R = func(C, constants) # Make relaxation matrix
 

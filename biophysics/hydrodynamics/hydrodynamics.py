@@ -42,11 +42,14 @@ def scaled_diffusion(Do, size_multiple, exponent):
     return D_scaled
 
 # For self-assembly of monomers
-def monomer_diffusion_dictionary(P_dict):
+def monomer_diffusion_dictionary(P_dict, type='Spherical'):
     
     D_dict = P_dict.copy()
     D_dict['size factor'] = np.array([int(k[1:]) for k in P_dict.keys()]) # For Dz calculation
-    D_dict['exponent'] = np.full(len(P_dict.keys()),-0.333) # Spherical scaling
+    if type is 'Spherical':
+        D_dict['exponent'] = np.full(len(P_dict.keys()),-0.333) # Spherical scaling factor
+    if type is 'Linear':
+        D_dict['exponent'] = np.full(len(P_dict.keys()),-0.6) # Linear scaling factor
     D_dict['Dz'] = np.zeros(1)
     
     return D_dict
