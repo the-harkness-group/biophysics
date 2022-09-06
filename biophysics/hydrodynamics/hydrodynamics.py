@@ -49,7 +49,7 @@ def monomer_diffusion_dictionary(P_dict, type='Spherical'):
     if type is 'Spherical':
         D_dict['exponent'] = np.full(len(P_dict.keys()),-0.333) # Spherical scaling factor
     if type is 'Linear':
-        D_dict['exponent'] = np.full(len(P_dict.keys()),-0.6) # Linear scaling factor
+        D_dict['exponent'] = np.full(len(P_dict.keys()),-1.0) # Linear scaling factor
     D_dict['Dz'] = np.zeros(1)
     
     return D_dict
@@ -92,4 +92,26 @@ def calculate_Dz_isothermal(D_dict, C_dict, Do):
     D_dict['Dz'] = Dz_num/Dz_den
     
     return D_dict
+
+### Calculate scattering vector using detector angle and wavelength
+def scattering_vector():
+
+    from scipy.constants import pi
+    
+    ### Define constants and instrument parameters for Wyatt DynaPRO DLS plate reader
+    n = 1.3347
+    wavelength = 824e-9
+    theta = (150)*(pi/180)
+    
+    q = (4*pi*n/wavelength)*np.sin(theta/2)
+    
+    return q
+
+### Simulate DLS autocorrelation function
+def autocorrelation(t, D, B, beta, mu2):
+    
+    q = scattering_vector()
+    g2 = B + beta*np.exp(-2.*D*q**2*t)*((1 + (mu2/2.)*t**2)**2)
+    
+    return g2
     

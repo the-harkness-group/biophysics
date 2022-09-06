@@ -9,22 +9,23 @@ def total(n, x): # For getting probabilities of every state in the binomial prob
 
     probs = {'n':[],'k':[],'x':[],'P':[]}
     for k in range(n+1):
-        for xval in x:
-            probs['n'].append(n)
-            probs['k'].append(k)
-            probs['x'].append(xval)
-            probs['P'].append(comb(n,k)*(xval**k)*((1-xval)**(n-k)))
-    df = pd.DataFrame(probs)
+        probs = iterate(probs, n, k, x)
 
-    return df # Return pandas dataframe
+    return pd.DataFrame(probs)
 
 def states(n, k, x): # For getting probabilities of individual states in the binomial probability distribution
 
     probs = {'n':[],'k':[],'x':[],'P':[]}
+    probs = iterate(probs, n, k, x)
+
+    return pd.DataFrame(probs)
+
+def iterate(probs, n, k, x):
+
     for xval in x:
         probs['n'].append(n)
         probs['k'].append(k)
         probs['x'].append(xval)
         probs['P'].append(comb(n,k)*(xval**k)*((1-xval)**(n-k)))
 
-    return probs # Return dictionary
+    return probs

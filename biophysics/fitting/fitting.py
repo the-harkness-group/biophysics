@@ -6,12 +6,14 @@ Created on Tue Mar  9 15:04:11 2021
 @author: harkness
 """
 
+from dataclasses import dataclass
 import time
 import numpy as np
 import pickle
 import pandas as pd
 from lmfit import Parameters, minimize, Model, report_fit
 import copy
+from dataclasses import dataclass
 
 # Simple fits exploiting lmfit, e.g. for fitting an exponential
 def simple_fit(model, guess_params, x, y):
@@ -111,13 +113,38 @@ def scaled_objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
         
     return resid
 
+# @dataclass
+# class MonteCarlo:
+#     "For estimating parameter errors from a fit using the Monte Carlo method"
+#     fit_data: object
+#     opt_params: object
+#     fit_constants: dict
+#     wrapper_func: function
+#     wrapper_args: dict
+#     observe: str
+#     MC_iter: int
+#     RMSD: float
+#     MC_objective: function
+#     method: str
+
+#     def simulate_best_fit(self) -> object:
+
+#         self.best_fit = self.fit_data.copy()
+
+#         for x in range(len(self.best_fit)):
+
+#             observable = np.array(wrapper_func(self.opt_params, wrapper_args, perfect_data.Temperature.iloc[x], 
+#             perfect_data.Concentration.iloc[x]))
+#             perfect_data.loc[(perfect_data.Temperature == perfect_data.Temperature.iloc[x]) &
+#             (perfect_data.Concentration == perfect_data.Concentration.iloc[x]), observe] = observable
+
 # Generate errors by Monte Carlo analysis
 def montecarloerrors(fit_data, opt_params, fit_constants, wrapper_func,
     wrapper_args, observe, MC_iter, RMSD, MC_objective, method='nelder'):
     
     perfect_data = fit_data.copy() # Make copy of dataframe
 
-    for x in range(len(perfect_data)): # Overwrite diffusion constants to be perfect simulated values from best fit params
+    for x in range(len(perfect_data)): # Generate best fit data
 
         observable = np.array(wrapper_func(opt_params, wrapper_args, perfect_data.Temperature.iloc[x], 
         perfect_data.Concentration.iloc[x]))
