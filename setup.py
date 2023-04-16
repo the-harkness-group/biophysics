@@ -6,7 +6,7 @@ setup(
     name="biophysics",
     version="0.2",
     author='Robert Harkness',
-    author_email='rharksci@gmail.com',
+    author_email='r.harkness@utoronto.ca',
     description='A package for managing and analyzing different types of experimental and simulated biophysical data.',
     long_description=long_description,
     long_description_content_type="text/markdown",

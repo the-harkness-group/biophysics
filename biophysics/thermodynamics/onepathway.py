@@ -43,7 +43,7 @@ def one_pathway(fit_params, fit_constants, temperature, concentration, P_dict, C
 
     return C_dict, P_dict
 
-### Two pathways, no cooperativity, dimensionless trimer concentration solver
+### Infinite association of monomers
 def equations(constants,X):
 
     XT = constants # Unpack constants

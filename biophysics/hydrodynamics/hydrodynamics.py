@@ -7,6 +7,7 @@ Created on Mon Jan 25 09:01:23 2021
 """
 
 import numpy as np
+from scipy.constants import k as kB, pi
 
 # Calculate solvent viscosity from 3rd order polynomial fits to SEDNTERP buffer viscosity data as a function of temperature
 def viscosity(Temperature, eta_coeffs):
@@ -21,7 +22,6 @@ def viscosity(Temperature, eta_coeffs):
 ### Calculate diffusion coefficients
 def stokes_diffusion(Temperature, eta, Rh):
     
-    kB = 1.38065e-23
     Dt = (kB*Temperature)/(6*np.pi*eta*Rh)
 
     return Dt
@@ -29,27 +29,47 @@ def stokes_diffusion(Temperature, eta, Rh):
 ### Calculate hydrodynamic radius
 def stokes_radius(Temperature, eta, D):
     
-    kB = 1.38065e-23
     Rh = (kB*Temperature)/(6*np.pi*eta*D)
 
     return Rh
 
 # Calculate diffusion coefficients as a function of molecular size according to defined scaling
-def scaled_diffusion(Do, size_multiple, exponent):
+def scaled_diffusion(Do, size_multiple, exponent, shape='Spherical', f=None):
     
-    D_scaled = Do*size_multiple**exponent
+    if shape is 'Spherical':
+        D_scaled = Do*size_multiple**exponent
+    if shape is 'Linear':
+        D_scaled = Do*(size_multiple**exponent)*f
     
     return D_scaled
 
+def disk_rod_diffusion(i, p1, T):
+
+    eta = 0.0011
+    L1 = 6.5e-9
+    d1 = L1/p1
+
+    L = i*L1
+    p = i*p1
+    f0 = 6*pi*eta*L*(3/(16*p**2))**(1/3)
+    f_f0 = 1.009 + 0.01395*np.log(p) + 0.07880*np.log(p)**2 + 0.00604*np.log(p)**3
+    f = f0*f_f0
+    D = kB*T/f
+
+    return D
+
 # For self-assembly of monomers
-def monomer_diffusion_dictionary(P_dict, type='Spherical'):
+def monomer_diffusion_dictionary(P_dict, shape='Spherical', p=None):
     
     D_dict = P_dict.copy()
     D_dict['size factor'] = np.array([int(k[1:]) for k in P_dict.keys()]) # For Dz calculation
-    if type is 'Spherical':
+    if shape is 'Spherical':
         D_dict['exponent'] = np.full(len(P_dict.keys()),-0.333) # Spherical scaling factor
-    if type is 'Linear':
+        D_dict['f'] = None
+    if shape is 'Linear':
         D_dict['exponent'] = np.full(len(P_dict.keys()),-1.0) # Linear scaling factor
+        v_correct = np.array([0.632 + (1.165/p[i]) + (0.1/p[i]**2) for i in np.arange(len(p))])
+        D_dict['f'] = np.array([2*np.log(p[i]) + v_correct[i] for i in np.arange(len(p))])/(2*np.log(p[0]) + v_correct[0])
     D_dict['Dz'] = np.zeros(1)
     
     return D_dict
@@ -81,22 +101,22 @@ def calculate_Dz(D_dict, C_dict, temperature, eta_coeffs, Rho):
     
     return D_dict
 
-def calculate_Dz_isothermal(D_dict, C_dict, Do):
-    
+def calculate_Dz_isothermal(D_dict, C_dict, Do, shape='Spherical'):
+
     Dz_num = 0 # Get Dz
     Dz_den = 0
     for y, k in enumerate(C_dict.keys()): # C_dict stays same length
-        D_dict[k] = scaled_diffusion(Do, D_dict['size factor'][y], D_dict['exponent'][y])
+        D_dict[k] = scaled_diffusion(Do, D_dict['size factor'][y], D_dict['exponent'][y],
+        shape=shape, f=D_dict['f'][y])
         Dz_num += (D_dict['size factor'][y]**2)*C_dict[k]*D_dict[k] # Diffusion
         Dz_den += (D_dict['size factor'][y]**2)*C_dict[k]
+
     D_dict['Dz'] = Dz_num/Dz_den
     
     return D_dict
 
 ### Calculate scattering vector using detector angle and wavelength
 def scattering_vector():
-
-    from scipy.constants import pi
     
     ### Define constants and instrument parameters for Wyatt DynaPRO DLS plate reader
     n = 1.3347

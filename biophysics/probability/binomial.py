@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from urllib.request import ProxyBasicAuthHandler
 import numpy as np
 from scipy.special import comb
 import pandas as pd

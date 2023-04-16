@@ -1,5 +1,5 @@
 import numpy as np
-
+import time as clock
 # A propagator for numerical integration of a system of ordinary differential equations
 # Propagates systems of equations of the form d/dt C(t) = R*C(t)
 # C(t) is a vector of time-dependent concentrations, e.g. of molecules
@@ -17,7 +17,7 @@ import numpy as np
 # Requires a function func where the relaxation matrix is defined
 # This propagation could also be done with a matrix exponential as in NMR analyses
 
-def propagator(t, C, func, constants): # solve_ivp 
+def propagator(t, C, func, constants): # solve_ivp
 
     R = func(C, constants) # Make relaxation matrix
 
