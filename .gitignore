@@ -1,4 +1,4 @@
-biophysics.egg-info/
+biophysics.egg-info
 dist/
 build/
 /__pycache__/
