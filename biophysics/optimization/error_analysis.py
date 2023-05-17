@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from copy import deepcopy
 from lmfit import Parameters, minimize, report_fit, Minimizer
-import lmfit
 from scipy.interpolate import griddata
 from scipy.stats import f
 import time as tt
@@ -68,7 +67,7 @@ class ErrorAnalysis:
 
                         opt_params_copy = deepcopy(self.opt_params)
     
-    def parameter_correlation_fits(self, experiment, MT, ST, salt, objective):
+    def parameter_correlation_fits(self, **kwargs):
 
         maxParallelProcesses = cpu_count()
         print('')
@@ -80,7 +79,7 @@ class ErrorAnalysis:
             with ProcessPoolExecutor(max_workers = maxParallelProcesses) as parallelExecution:
                 future_results = {}
                 for x in list(np.arange(len(parameter_sets))):
-                    future_result = parallelExecution.submit(self.parallel_fit_task, parameter_sets[x], experiment, MT, ST, salt, objective)
+                    future_result = parallelExecution.submit(self.parallel_fit_task, parameter_sets[x], **kwargs)
                     future_results[future_result] = x
                 for future in as_completed(future_results):
                     ax = future_results[future]
@@ -99,7 +98,7 @@ class ErrorAnalysis:
         end = tt.time()
         print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
 
-    def monte_carlo_fits(self, experiment, MT, ST, salt, objective):
+    def monte_carlo_fits(self, **kwargs):
 
         maxParallelProcesses = cpu_count()
         print('')
@@ -108,7 +107,7 @@ class ErrorAnalysis:
         with ProcessPoolExecutor(max_workers = maxParallelProcesses) as parallelExecution:
             future_results = {}
             for x in list(np.arange(1, self.monte_carlo_iterations + 1)):
-                future_result = parallelExecution.submit(self.monte_carlo_parallel_fit_task, self.opt_params, experiment, MT, ST, salt, objective, self.rmsd)
+                future_result = parallelExecution.submit(self.monte_carlo_parallel_fit_task, self.opt_params, self.rmsd, **kwargs)
                 future_results[future_result] = x
             for future in as_completed(future_results):
                 ax = future_results[future]
@@ -118,6 +117,8 @@ class ErrorAnalysis:
                     print('%r generated an exception: %s' % (ax, exc))
                 else:
                     print(f'Monte Carlo iteration {ax} completed.')
+                    print(self.monte_carlo_parameters)
+                    print('Hyeaaaaaaaahhh')
                     {self.monte_carlo_parameters[k].append(result.params[k].value) for k in self.monte_carlo_parameters.keys()}
         end = tt.time()
         print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
@@ -136,9 +137,9 @@ class ErrorAnalysis:
         self.monte_carlo_errors = {f"{k} error":None for k in self.opt_params.keys() if self.opt_params[k].vary == True}
 
     @staticmethod
-    def parallel_fit_task(initial_guess_params, experiment, MT, ST, salt, objective, min_method='leastsq', print_current_params=False):
+    def parallel_fit_task(initial_guess_params, min_method='leastsq', print_current_params=False, **kwargs): #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-        minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(experiment, MT, ST, salt, print_current_params))
+        minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(kwargs, print_current_params))
 
         return minimizer_result
     
@@ -318,7 +319,6 @@ class InitialParameterExplorer:
 
         Returns:
             params: (object) contains names, values, and constraints for parameters used in the fitting routine.
-        
         """
 
         params = Parameters()
@@ -354,4 +354,4 @@ class InitialParameterExplorer:
         
         print(f'The optimal starting parameters for your fit, with the minimum final RSS = {self.best_fit}, are:')
         for k in self.best_params.keys():
-            print(f"{k}: {params[k].value}")
+            print(f"{k}: {self.best_params[k].value}")
