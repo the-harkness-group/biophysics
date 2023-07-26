@@ -1,0 +1,14 @@
+Metadata-Version: 2.1
+Name: biophysics
+Version: 0.2
+Summary: A package for managing and analyzing different types of experimental and simulated biophysical data.
+Home-page: https://github.com/robharkness/biophysics
+Author: Robert Harkness
+Author-email: r.harkness@utoronto.ca
+License: GNU GPL v3.0
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# Biophysics!
+
+This is a python package dedicated to managing and analyzing biophysical data. At the moment it can handle dynamic light scattering, isothermal titration and differential scanning calorimetry, and nuclear magnetic resonance spectroscopy data. It also contains other useful mathematical functions for application in biophysical analyses.

@@ -85,7 +85,7 @@ def get_continuous_rgba_cmap(hex_list, num_elements, cm_space, float_list=None):
 def get_colors(color_map, num_colors):
 
     cmap = matplotlib.cm.get_cmap(color_map)
-    fracs = [x/num_colors for x in range(num_colors)]
+    fracs = [(x+1)/num_colors for x in range(num_colors)]
     colors = cmap(fracs)
 
     return colors

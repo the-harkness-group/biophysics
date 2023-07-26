@@ -115,6 +115,18 @@ def calculate_Dz_isothermal(D_dict, C_dict, Do, shape='Spherical'):
     
     return D_dict
 
+def pop_weighted_avg_diff(D_dict, P_dict, Do, shape='Spherical'): # for methods like NMR
+
+    Davg = 0
+    for y, k in enumerate(P_dict.keys()): # C_dict stays same length
+        D_dict[k] = scaled_diffusion(Do, D_dict['size factor'][y], D_dict['exponent'][y],
+        shape=shape, f=D_dict['f'][y])
+        Davg += P_dict[k]*D_dict[k]
+
+    D_dict['Dz'] = Davg
+
+    return D_dict
+
 ### Calculate scattering vector using detector angle and wavelength
 def scattering_vector():
     

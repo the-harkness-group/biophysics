@@ -11,6 +11,7 @@ import time as tt
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 from biophysics.plotting.plotting import make_pdf
+import pickle
 
 class ErrorAnalysis:
 
@@ -159,7 +160,7 @@ class ErrorAnalysis:
 
             x = group['Param 1 value'].values
             y = group['Param 2 value'].values
-            z = (group['RSS'].values - self.minimizer_result.chisqr)/self.minimizer_result.nfree
+            z = (group['RSS'].values - self.minimizer_result.chisqr)/self.minimizer_result.nfree ######## CHECK THAT THIS IS THE RIGHT NORMALIZATION!!!!
 
             xgrid = np.reshape(x, (self.points, self.points))
             ygrid = np.reshape(y, (self.points, self.points))
@@ -355,3 +356,46 @@ class InitialParameterExplorer:
         print(f'The optimal starting parameters for your fit, with the minimum final RSS = {self.best_fit}, are:')
         for k in self.best_params.keys():
             print(f"{k}: {self.best_params[k].value}")
+
+
+######################### old mc errors that is used by some scripts #####################################
+
+def montecarloerrors(fit_data, opt_params, fit_constants, wrapper_func, wrapper_args, observe, MC_iter, RMSD, MC_objective, method='nelder'):
+    
+    perfect_data = fit_data.copy() # Make copy of dataframe
+
+    for x in range(len(perfect_data)): # Generate best fit data
+
+        observable = np.array(wrapper_func(opt_params, wrapper_args, perfect_data.Temperature.iloc[x], 
+        perfect_data.Concentration.iloc[x]))
+        perfect_data.loc[(perfect_data.Temperature == perfect_data.Temperature.iloc[x]) &
+        (perfect_data.Concentration == perfect_data.Concentration.iloc[x]), observe] = observable
+
+    MC_dict = {k:[] for k in opt_params.keys()} # Make dictionary for Monte Carlo parameters
+    errors = {k+' error':[] for k in MC_dict.keys()} # Make dictionary for errors
+    
+    # Serial implementation
+    counter = 1
+    for x in range(MC_iter):
+
+        print(f"######### The current Monte-Carlo iteration is: {counter} #########")
+
+        perturbed_data = perfect_data.copy() # Copy perfect data groups
+        perturbed_data[observe] = perturbed_data[observe] + np.random.normal(scale=RMSD, size=np.size(perturbed_data[observe])) # Perturb perfect data for MC analysis
+
+        perturbed_result = minimize(MC_objective, opt_params, method, args=(perturbed_data, 
+        wrapper_func, wrapper_args, observe))
+        {MC_dict[k].append(perturbed_result.params[k]) for k in perturbed_result.params.keys()}
+
+        counter = counter + 1
+
+    for k in MC_dict.keys():
+        errors[k+' error'].append(np.std(MC_dict[k]))
+
+    for k1,k2 in zip(opt_params.keys(),errors.keys()):
+        print(f"{k1} = {opt_params[k1].value} +/- {errors[k2][0]}")
+        
+    with open(f"MC_parameter_dictionary_{MC_iter}iterations_{fit_data.Sample.iloc[0]}_serial.pickle",'wb') as f:
+        pickle.dump(MC_dict,f,protocol=pickle.HIGHEST_PROTOCOL)
+    
+    return MC_dict, errors
