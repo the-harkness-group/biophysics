@@ -15,7 +15,7 @@ import pickle
 
 class ErrorAnalysis:
 
-    def __init__(self, minimizer_result, monte_carlo_iterations=None, rmsd=None, range_factor=None, points=None):
+    def __init__(self, experiment, minimizer_result, monte_carlo_iterations=None, rmsd=None, range_factor=None, points=None):
 
         self.minimizer_result = deepcopy(minimizer_result)
         self.opt_params = deepcopy(minimizer_result.params)
@@ -23,6 +23,7 @@ class ErrorAnalysis:
         self.rmsd = rmsd
         self.range_factor = range_factor # For correlation surfaces
         self.points = points
+        self.experiment = experiment
 
     @staticmethod
     def parameter_range(opt_param, stderr, num_points=20):
