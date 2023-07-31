@@ -4,7 +4,8 @@ from copy import deepcopy
 class Experiment:
     """ Represents a physical experiment and is passed to the optimizer and error minimization
     classes for running fits of models and to the error analyzer class for subsequent analysis 
-    of the fitted parameter errors. Data set to be read must be .csv. """
+    of the fitted parameter errors. Implements the data in the form of a pandas dataframe.
+    Data set to be read must be .csv. """
 
     def __init__(self, experiment_type=None, data_file=None, x=None, y=None, **kwargs):
         self.experiment_type = experiment_type
