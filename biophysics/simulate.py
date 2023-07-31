@@ -25,6 +25,7 @@ class Simulator():
     def evaluate_function(self, func_name, result_name):
         self.__setattr__(result_name, self.__dict__[func_name](**self.__dict__[func_name + '_args']))
 
+    @staticmethod
     def simulate_dataframe(experiment, x_lower_bound, x_upper_bound, points, x_name=None, iterable_names=None):
         x = np.linspace(x_lower_bound, x_upper_bound, points) # Independent variable
         iterables = [] # Parameters to iterate over that can change for each set of x
