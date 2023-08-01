@@ -15,7 +15,7 @@ import pickle
 
 class ErrorAnalysis:
 
-    def __init__(self, experiment, minimizer_result, monte_carlo_iterations=None, rmsd=None, range_factor=None, points=None):
+    def __init__(self, minimizer_result, monte_carlo_iterations=None, rmsd=None, range_factor=None, points=None):
 
         self.minimizer_result = deepcopy(minimizer_result)
         self.opt_params = deepcopy(minimizer_result.params)
@@ -23,7 +23,6 @@ class ErrorAnalysis:
         self.rmsd = rmsd
         self.range_factor = range_factor # For correlation surfaces
         self.points = points
-        self.experiment = experiment
 
     @staticmethod
     def parameter_range(opt_param, stderr, num_points=20):
@@ -100,7 +99,7 @@ class ErrorAnalysis:
         end = tt.time()
         print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
 
-    def monte_carlo_fits(self, **kwargs):
+    def monte_carlo_fits(self, expt, sim, objective):
 
         maxParallelProcesses = cpu_count()
         print('')
@@ -109,7 +108,7 @@ class ErrorAnalysis:
         with ProcessPoolExecutor(max_workers = maxParallelProcesses) as parallelExecution:
             future_results = {}
             for x in list(np.arange(1, self.monte_carlo_iterations + 1)):
-                future_result = parallelExecution.submit(self.monte_carlo_parallel_fit_task, self.opt_params, self.rmsd, **kwargs)
+                future_result = parallelExecution.submit(self.monte_carlo_parallel_fit_task, self.opt_params, self.rmsd, expt, sim, objective)
                 future_results[future_result] = x
             for future in as_completed(future_results):
                 ax = future_results[future]
@@ -120,7 +119,6 @@ class ErrorAnalysis:
                 else:
                     print(f'Monte Carlo iteration {ax} completed.')
                     print(self.monte_carlo_parameters)
-                    print('Hyeaaaaaaaahhh')
                     {self.monte_carlo_parameters[k].append(result.params[k].value) for k in self.monte_carlo_parameters.keys()}
         end = tt.time()
         print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
@@ -146,11 +144,12 @@ class ErrorAnalysis:
         return minimizer_result
     
     @staticmethod
-    def monte_carlo_parallel_fit_task(initial_guess_params, perfect_experiment, MT, ST, salt, objective, rmsd, min_method='leastsq', print_current_params=False):
+    def monte_carlo_parallel_fit_task(initial_guess_params, rmsd, perfect_experiment, sim, objective, min_method='leastsq', print_current_params=False):
 
         perturbed_experiment = deepcopy(perfect_experiment)
-        perturbed_experiment.Fluorescence = np.array(perturbed_experiment.Fluorescence) + np.random.RandomState().normal(scale=rmsd, size=(np.size(perturbed_experiment.Fluorescence, 0), 1))
-        perturbed_minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(perturbed_experiment, MT, ST, salt, print_current_params))
+        # Add noise to "perfect" simulated best-fit data according to best-fit RMSD
+        perturbed_experiment.data[perturbed_experiment.y] = np.array(perturbed_experiment.data[perturbed_experiment.y]) + np.random.RandomState().normal(scale=rmsd, size=(np.size(perturbed_experiment.data[perturbed_experiment.y], 0), 1))
+        perturbed_minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(perturbed_experiment, sim, print_current_params))
         return perturbed_minimizer_result
 
     def parameter_correlation_surfaces(self, sample_name):
@@ -161,7 +160,8 @@ class ErrorAnalysis:
 
             x = group['Param 1 value'].values
             y = group['Param 2 value'].values
-            z = (group['RSS'].values - self.minimizer_result.chisqr)/self.minimizer_result.nfree ######## CHECK THAT THIS IS THE RIGHT NORMALIZATION!!!!
+            z = (group['RSS'].values/(self.minimizer_result.nfree - 2)) - (self.minimizer_result.chisqr/self.minimizer_result.nfree) ######## CHECK THAT THIS IS THE RIGHT NORMALIZATION!!!!
+            ### I think z needs to have the first term normalized by nfree - 2 since 2 parameters are fixed relative to the fits where everything floats
 
             xgrid = np.reshape(x, (self.points, self.points))
             ygrid = np.reshape(y, (self.points, self.points))
@@ -357,46 +357,3 @@ class InitialParameterExplorer:
         print(f'The optimal starting parameters for your fit, with the minimum final RSS = {self.best_fit}, are:')
         for k in self.best_params.keys():
             print(f"{k}: {self.best_params[k].value}")
-
-
-######################### old mc errors that is used by some scripts #####################################
-
-def montecarloerrors(fit_data, opt_params, fit_constants, wrapper_func, wrapper_args, observe, MC_iter, RMSD, MC_objective, method='nelder'):
-    
-    perfect_data = fit_data.copy() # Make copy of dataframe
-
-    for x in range(len(perfect_data)): # Generate best fit data
-
-        observable = np.array(wrapper_func(opt_params, wrapper_args, perfect_data.Temperature.iloc[x], 
-        perfect_data.Concentration.iloc[x]))
-        perfect_data.loc[(perfect_data.Temperature == perfect_data.Temperature.iloc[x]) &
-        (perfect_data.Concentration == perfect_data.Concentration.iloc[x]), observe] = observable
-
-    MC_dict = {k:[] for k in opt_params.keys()} # Make dictionary for Monte Carlo parameters
-    errors = {k+' error':[] for k in MC_dict.keys()} # Make dictionary for errors
-    
-    # Serial implementation
-    counter = 1
-    for x in range(MC_iter):
-
-        print(f"######### The current Monte-Carlo iteration is: {counter} #########")
-
-        perturbed_data = perfect_data.copy() # Copy perfect data groups
-        perturbed_data[observe] = perturbed_data[observe] + np.random.normal(scale=RMSD, size=np.size(perturbed_data[observe])) # Perturb perfect data for MC analysis
-
-        perturbed_result = minimize(MC_objective, opt_params, method, args=(perturbed_data, 
-        wrapper_func, wrapper_args, observe))
-        {MC_dict[k].append(perturbed_result.params[k]) for k in perturbed_result.params.keys()}
-
-        counter = counter + 1
-
-    for k in MC_dict.keys():
-        errors[k+' error'].append(np.std(MC_dict[k]))
-
-    for k1,k2 in zip(opt_params.keys(),errors.keys()):
-        print(f"{k1} = {opt_params[k1].value} +/- {errors[k2][0]}")
-        
-    with open(f"MC_parameter_dictionary_{MC_iter}iterations_{fit_data.Sample.iloc[0]}_serial.pickle",'wb') as f:
-        pickle.dump(MC_dict,f,protocol=pickle.HIGHEST_PROTOCOL)
-    
-    return MC_dict, errors

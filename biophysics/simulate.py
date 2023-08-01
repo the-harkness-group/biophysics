@@ -11,11 +11,11 @@ class Simulator():
         self.y = y
 
     def set_function(self, func_name, func):
-        self.__setattr__(func_name, func)
+        setattr(self, func_name, func)
 
     def inspect_function_args(self, func_name):
-       func_args = inspect.signature(self.__dict__[func_name]).parameters
-       self.__setattr__(func_name + '_args', {k:None for k in func_args})
+        func_args = inspect.signature(self.__dict__[func_name]).parameters
+        setattr(self, func_name + '_args', {k:None for k in func_args})
     
     def set_function_args(self, func_name, **kwargs):
         for k in kwargs.keys():
@@ -23,7 +23,7 @@ class Simulator():
                 self.__dict__[func_name + '_args'][k] = kwargs[k]
 
     def evaluate_function(self, func_name, result_name):
-        self.__setattr__(result_name, self.__dict__[func_name](**self.__dict__[func_name + '_args']))
+        setattr(self, result_name, self.__dict__[func_name](**self.__dict__[func_name + '_args']))
 
     @staticmethod
     def simulate_dataframe(experiment, x_lower_bound, x_upper_bound, points, x_name=None, iterable_names=None):

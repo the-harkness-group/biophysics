@@ -7,14 +7,20 @@ class Experiment:
     of the fitted parameter errors. Implements the data in the form of a pandas dataframe.
     Data set to be read must be .csv. """
 
-    def __init__(self, experiment_type=None, data_file=None, x=None, y=None, **kwargs):
+    def __init__(self, experiment_type=None, data_file=None, construct=None, x=None, y=None, **kwargs):
         self.experiment_type = experiment_type
         self.data_file = data_file
+        self.construct = construct
         self.x = x
         self.y = y
         for k in kwargs:
             setattr(self, k, kwargs[k])
-        self.load_data()
+
+        try:
+            self.load_data()
+        except:
+            print('Cannot load data file; data_file variable set to something other than .csv file')
+            pass
 
     def load_data(self):
         self.data = pd.read_csv(self.data_file)
