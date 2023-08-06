@@ -2,6 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import pandas as pd
 from copy import deepcopy
 from lmfit import Parameters, minimize, report_fit, Minimizer
@@ -13,6 +14,7 @@ from multiprocessing import cpu_count
 from biophysics.plotting.plotting import make_pdf
 import pickle
 import os
+import pyDOE as pyd
 
 class ErrorAnalysis:
 
@@ -36,24 +38,27 @@ class ErrorAnalysis:
             print('Error supplied for generating parameter correlation range is larger than the parameter! Defaulting to param/1.3 <= param <= param*1.3...')
             opt_param_range = np.linspace(opt_param/1.3, opt_param*1.3, num_points)
         else:
-            opt_param_range = np.linspace(opt_param - 25*stderr, opt_param + 25*stderr, num_points)
+            opt_param_range = np.linspace(opt_param - 20*stderr, opt_param + 20*stderr, num_points)
             if opt_param_range[opt_param_range.argmin()] < 0:
                 print('The first value in the parameter correlation range is <0, defaulting to param/1.3 <= param <= param*1.3...')
                 opt_param_range = np.linspace(opt_param/1.3, opt_param*1.3, num_points)
 
         return opt_param_range
     
-    def correlation_pairs(self, vary_other_params=False):
+    def correlation_pairs(self, params_to_correlate=None, optimize_other_params=False):
 
         self.correlation_pairs = {} # Big dictionary of all parameter pair combinations and their associated Parameters objects for passing to fitting routine
-        if vary_other_params == True:
-            params_to_correlate = [k for k in self.opt_params.keys() if self.opt_params[k].vary == True]
+        #params_to_correlate = [k for k in self.opt_params.keys() if self.opt_params[k].vary == True]
         opt_params_copy = deepcopy(self.opt_params)
 
         for i in range(len(params_to_correlate) - 1): # Need to correlate ith parameter with only the parameters ahead of it, don't need to do last parameter because it gets done along the way
+            if self.opt_params[params_to_correlate[i]].stderr is None:
+                self.opt_params[params_to_correlate[i]].stderr = 0.01*self.opt_params[params_to_correlate[i]].value
             param_1_range = self.parameter_range(self.opt_params[params_to_correlate[i]].value, self.opt_params[params_to_correlate[i]].stderr, self.points)
 
             for j in range(i + 1, len(params_to_correlate)):
+                if self.opt_params[params_to_correlate[j]].stderr is None:
+                    self.opt_params[params_to_correlate[j]].stderr = 0.01*self.opt_params[params_to_correlate[j]].value
                 param_2_range = self.parameter_range(self.opt_params[params_to_correlate[j]].value, self.opt_params[params_to_correlate[j]].stderr, self.points)
                 self.correlation_pairs[f"{params_to_correlate[i]},{params_to_correlate[j]}"] = {f"{params_to_correlate[i]}":[], f"{params_to_correlate[j]}":[], "Parameter sets":[], "RSS":[], 'Fit results':[], 'Result order':[]}
 
@@ -66,11 +71,20 @@ class ErrorAnalysis:
                         opt_params_copy[params_to_correlate[j]].value = param_2
                         opt_params_copy[params_to_correlate[j]].vary = False
 
+                        if optimize_other_params == False: # DO NOT vary other parameters, this means that fit qualities will just be calculated for each parameter pair while the other parameters are fixed at the best fit values, i.e. NO FITTING!
+                            for p in opt_params_copy.keys():
+                                if p not in [params_to_correlate[i], params_to_correlate[j]]:
+                                    opt_params_copy[p].vary == False
+                        else: # DO vary the other parameters while the params being correlated are fixed, i.e. FITS WILL BE RUN!
+                            for p in opt_params_copy.keys():
+                                if p not in [params_to_correlate[i], params_to_correlate[j]]:
+                                    opt_params_copy[p].vary == True
+
                         self.correlation_pairs[f"{params_to_correlate[i]},{params_to_correlate[j]}"]["Parameter sets"].append(opt_params_copy) # Parallel fit results are not in the same order as this
 
                         opt_params_copy = deepcopy(self.opt_params)
     
-    def parameter_correlation_fits(self, expt, sim, objective):
+    def parameter_correlation_fits(self, expt, sim, func):
 
         maxParallelProcesses = cpu_count()
         print('')
@@ -78,11 +92,10 @@ class ErrorAnalysis:
         start = tt.time()
         for param_pairs in self.correlation_pairs.keys():
             parameter_sets = self.correlation_pairs[param_pairs]['Parameter sets']
-
             with ProcessPoolExecutor(max_workers = maxParallelProcesses) as parallelExecution:
                 future_results = {}
                 for x in list(np.arange(len(parameter_sets))):
-                    future_result = parallelExecution.submit(self.parallel_fit_task, parameter_sets[x], expt, sim, objective)
+                    future_result = parallelExecution.submit(self.parallel_fit_task, parameter_sets[x], expt, sim, func)
                     future_results[future_result] = x
                 for future in as_completed(future_results):
                     ax = future_results[future]
@@ -93,13 +106,19 @@ class ErrorAnalysis:
                     else:
                         print(f'Parameter pair {param_pairs} iteration {ax} completed.')
                         self.correlation_pairs[param_pairs]['Result order'].append(ax)
-                        self.correlation_pairs[param_pairs]['Fit results'].append(result.params)
-                        self.correlation_pairs[param_pairs]['RSS'].append(result.chisqr)
-                        self.correlation_pairs[param_pairs][param_pairs.split(',')[0]].append(result.params[param_pairs.split(',')[0]].value)
-                        self.correlation_pairs[param_pairs][param_pairs.split(',')[1]].append(result.params[param_pairs.split(',')[1]].value)
+                        # self.correlation_pairs[param_pairs]['Fit results'].append(result.params)
+                        # print(result.params)
+                        # self.correlation_pairs[param_pairs]['RSS'].append(result.chisqr)
+                        # self.correlation_pairs[param_pairs][param_pairs.split(',')[0]].append(result.params[param_pairs.split(',')[0]].value)
+                        # self.correlation_pairs[param_pairs][param_pairs.split(',')[1]].append(result.params[param_pairs.split(',')[1]].value)
+
+                        self.correlation_pairs[param_pairs]['Fit results'].append(result[0])
+                        self.correlation_pairs[param_pairs]['RSS'].append(result[1])
+                        self.correlation_pairs[param_pairs][param_pairs.split(',')[0]].append(result[0][param_pairs.split(',')[0]].value)
+                        self.correlation_pairs[param_pairs][param_pairs.split(',')[1]].append(result[0][param_pairs.split(',')[1]].value)
 
         end = tt.time()
-        print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
+        print(f"### Elapsed parameter correlation fit time: {end-start} s ###")
 
     def monte_carlo_fits(self, expt, sim, objective):
 
@@ -140,11 +159,12 @@ class ErrorAnalysis:
         self.monte_carlo_errors = {f"{k} error":None for k in self.opt_params.keys() if self.opt_params[k].vary == True}
 
     @staticmethod
-    def parallel_fit_task(initial_guess_params, expt, sim, objective, min_method='leastsq', print_current_params=False): 
+    def parallel_fit_task(initial_guess_params, expt, sim, func, min_method='leastsq', print_current_params=False): 
 
-        minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(expt, sim, print_current_params))
+        #result = minimize(objective, initial_guess_params, method = min_method, args=(expt, sim, print_current_params))
+        result = func(initial_guess_params, expt, sim)
 
-        return minimizer_result
+        return initial_guess_params, result
     
     @staticmethod
     def monte_carlo_parallel_fit_task(initial_guess_params, rmsd, perfect_experiment, sim, objective, min_method='leastsq', print_current_params=False):
@@ -155,7 +175,7 @@ class ErrorAnalysis:
         perturbed_minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(perturbed_experiment, sim, print_current_params))
         return perturbed_minimizer_result, perturbed_experiment
 
-    def parameter_correlation_surfaces(self, sample_name):
+    def parameter_correlation_surfaces(self, sample_name, confidence_level, dof_num, dof_den):
 
         pdf = make_pdf(f"{sample_name}_parameter_correlation_surfaces.pdf")
         pair_groups = self.correlation_result_df.groupby('Parameter pair')
@@ -163,23 +183,29 @@ class ErrorAnalysis:
 
             x = group['Param 1 value'].values
             y = group['Param 2 value'].values
-            z = (group['RSS'].values/(self.minimizer_result.nfree - 2)) - (self.minimizer_result.chisqr/self.minimizer_result.nfree) # CHECK THAT THIS IS THE RIGHT NORMALIZATION!!!!
-            ### I think z needs to have the first term normalized by nfree - 2, since 2 parameters are fixed relative to the fits where everything floats
+            z = group['RSS'].values
 
             xgrid = np.reshape(x, (self.points, self.points))
             ygrid = np.reshape(y, (self.points, self.points))
             zgrid = np.reshape(z, (self.points, self.points))
 
+            conf_cont = self._calculate_confidence_contour(confidence_level, dof_num, dof_den, xgrid, ygrid, zgrid)
+
+            z = (group['RSS'].values - self.minimizer_result.chisqr)/(dof_den)
+            zgrid = np.reshape(z, (self.points, self.points))
+
             fig, ax = plt.subplots(1, 1)
             a = ax.contourf(xgrid, ygrid, zgrid, levels=200, cmap='turbo')
-            cbar = fig.colorbar(a)
+            ax.plot(conf_cont['x'], conf_cont['y'], 'w.', markersize=6, mew=0.5, mec='k')
+            ax.plot(self.opt_params[ind.split(',')[0]].value, self.opt_params[ind.split(',')[1]].value, 'X', markersize=10, mew=1, mec='k', mfc='w')
+            cbar = fig.colorbar(a, format='%.1d')
             cbar.ax.set_title('$\Delta$RSS$_{red.}$', pad=10)
             x_label = ind.split(',')[0]
             y_label = ind.split(',')[1]
             ax.set_xlabel(x_label)
             ax.set_ylabel(y_label)
             fig.tight_layout()
-            pdf.savefig(fig)
+            pdf.savefig(fig, bbox_inches='tight')
             plt.close()
 
         pdf.close()
@@ -218,11 +244,45 @@ class ErrorAnalysis:
 
         pdf.close()
 
-    def calculate_confidence_contour(self, confidence_level:float, dof_numerator:int, dof_denominator:int, points:int, threshold:float):
+    def _calculate_confidence_contour(self, confidence_level:float, dof_num:int, dof_den:int, xgrid:np.ndarray, ygrid:np.ndarray, zgrid:np.ndarray) -> dict:
+        """ Determines the the confidence contour for a model fit using the value of the F distribution with a given confidence level.
+        
+        Arguments:
+            confidence_level: the confidence level to determine the F-statistic, given as e.g. 0.95
+            xgrid: grid of x parameter values for the error surface
+            ygrid: grid of y parameter values for the error surface
+            zgrid: grid of the fit quality values (e.g. RSS) defining the error surface contours
 
-        F_crit = f.ppf(confidence_level, dof_numerator, dof_denominator)
+        Returns:
+            F-value: float
+            confidence_contour: dict containing x, y, and z values that define the set of parameters giving curve fits that are statistically indistinguishable from the best fit. x,y pairs can be plotted on the error surface to define the confidence contour.
+        """
 
-        return confidence_contour
+        F_crit = f.ppf(confidence_level, dof_num, dof_den)
+        RSS_crit = self.minimizer_result.chisqr*(F_crit*(dof_num/dof_den) + 1)
+
+        # First get x,y coordinates of all RSS values that are below the critical RSS
+        threshold_values = {'x':[],'y':[], 'z':[]}
+        for i in range(len(zgrid[:,0])):
+            for j in range(len(zgrid[0,:])):
+                if zgrid[i,j] <= RSS_crit:
+                    threshold_values['x'].append(xgrid[i,j])
+                    threshold_values['y'].append(ygrid[i,j])
+                    threshold_values['z'].append(zgrid[i,j])
+        
+        # Now find only the x,y coordinates that define the edges of the confidence contour, since above includes points within the contour as well
+        threshold_values_df = pd.DataFrame(threshold_values)
+        groups = threshold_values_df.groupby('x')
+        conf_cont = {'x':[], 'y':[], 'z':[]}
+        for ind, group in groups:
+            conf_cont['x'].append(ind)
+            conf_cont['x'].append(ind)
+            conf_cont['y'].append(group.y.iloc[0])
+            conf_cont['y'].append(group.y.iloc[-1])
+            conf_cont['z'].append(group.z.iloc[0])
+            conf_cont['z'].append(group.z.iloc[-1])
+
+        return conf_cont
 
     def monte_carlo_distributions(self, sample_name):
 
@@ -319,7 +379,6 @@ class InitialParameterExplorer:
             The parameters within each set (list) are scaled (using a log10 scale) according to parameter boundaries supplied to the class object upon instantiation.
         """
 
-        import pyDOE as pyd
         lhs_params = pyd.lhs(self.num_params, self.num_samples, self.lhs_criterion)
 
         def scale_lhs_params():
@@ -366,7 +425,6 @@ class InitialParameterExplorer:
         fit_qualities = []
         opt_params = []
         for i, x in enumerate(self.lhs_params):
-            #params = self._make_parameter_object(x, **self.param_constraints)
             self._update_parameter_values(x)
             try:
                 minimizer_result = minimize(self.objective, self.params, method=self.minimizer_method, args=self.args)

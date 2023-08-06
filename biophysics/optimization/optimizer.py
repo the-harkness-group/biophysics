@@ -108,3 +108,13 @@ def scaled_objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
         /fit_data[observe].iloc[x]))
         
     return resid
+
+def rss(params, expt, sim):
+
+    sim.set_function_args('model', params=params)
+    sim.evaluate_function('model', 'model_result')
+    sim.set_function_args('observable', model_df=sim.model_result, fit_params=params)
+    sim.evaluate_function('observable', 'simulated_data')
+    rss = np.sum(np.square(expt.data[expt.y].values - sim.simulated_data[sim.y].values))
+
+    return rss
