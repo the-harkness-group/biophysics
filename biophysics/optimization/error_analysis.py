@@ -426,14 +426,18 @@ class InitialParameterExplorer:
         opt_params = []
         for i, x in enumerate(self.lhs_params):
             self._update_parameter_values(x)
+            print(f'Initializing parameter explorer fit {i} with params:')
+            for k in self.params.keys():
+                print(f"{k}: {self.params[k].value}")
             try:
                 minimizer_result = minimize(self.objective, self.params, method=self.minimizer_method, args=self.args)
                 opt_params.append(minimizer_result.params)
                 fit_qualities.append(minimizer_result.chisqr)
                 print(f'Initial parameter explorer fit {i} completed.')
+                print(f'RSS: {minimizer_result.chisqr}\n')
             except:
                 print(f'Parameter explorer fit {i} failed.')
-                print('Storing fit quality for this set of parameters as very poor, RSS = 1e32')
+                print('Storing fit quality for this set of parameters as very poor, RSS = 1e32\n')
                 opt_params.append(self.params)
                 fit_qualities.append(1e32)
 
