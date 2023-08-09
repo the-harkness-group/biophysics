@@ -8,6 +8,7 @@ from copy import deepcopy
 from lmfit import Parameters, minimize, report_fit, Minimizer
 from scipy.interpolate import griddata
 from scipy.stats import f
+from scipy.spatial import ConvexHull
 import time as tt
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
@@ -184,19 +185,20 @@ class ErrorAnalysis:
             x = group['Param 1 value'].values
             y = group['Param 2 value'].values
             z = group['RSS'].values
+            contour_points, confidence_hull = self._calculate_confidence_contour(confidence_level, dof_num, dof_den, x, y, z)
 
             xgrid = np.reshape(x, (self.points, self.points))
             ygrid = np.reshape(y, (self.points, self.points))
-            zgrid = np.reshape(z, (self.points, self.points))
-
-            conf_cont = self._calculate_confidence_contour(confidence_level, dof_num, dof_den, xgrid, ygrid, zgrid)
-
-            z = (group['RSS'].values - self.minimizer_result.chisqr)/(dof_den)
-            zgrid = np.reshape(z, (self.points, self.points))
+            zgrid = np.reshape((z - self.minimizer_result.chisqr)/(dof_den), (self.points, self.points)) # Reduced delta RSS
 
             fig, ax = plt.subplots(1, 1)
             a = ax.contourf(xgrid, ygrid, zgrid, levels=200, cmap='turbo')
-            ax.plot(conf_cont['x'], conf_cont['y'], 'w.', markersize=6, mew=0.5, mec='k')
+            if confidence_hull is not None:
+                for simplex in confidence_hull.simplices:
+                    ax.plot(contour_points[simplex, 0], contour_points[simplex, 1], 'w', linewidth=1, linestyle='dashed')
+            else:
+                for xy in contour_points: # Confidence hull was not created due to too few points, plot outline points only
+                    ax.plot(xy[0], xy[1], 'o', markersize=2, mec='k', mfc='w')
             ax.plot(self.opt_params[ind.split(',')[0]].value, self.opt_params[ind.split(',')[1]].value, 'X', markersize=10, mew=1, mec='k', mfc='w')
             cbar = fig.colorbar(a, format='%.1d')
             cbar.ax.set_title('$\Delta$RSS$_{red.}$', pad=10)
@@ -207,7 +209,6 @@ class ErrorAnalysis:
             fig.tight_layout()
             pdf.savefig(fig, bbox_inches='tight')
             plt.close()
-
         pdf.close()
 
     def parameter_confidence_interval_surfaces(self, sample_name):
@@ -244,45 +245,38 @@ class ErrorAnalysis:
 
         pdf.close()
 
-    def _calculate_confidence_contour(self, confidence_level:float, dof_num:int, dof_den:int, xgrid:np.ndarray, ygrid:np.ndarray, zgrid:np.ndarray) -> dict:
+    def _calculate_confidence_contour(self, confidence_level:float, dof_num:int, dof_den:int, x:np.ndarray, y:np.ndarray, z:np.ndarray):
         """ Determines the the confidence contour for a model fit using the value of the F distribution with a given confidence level.
         
         Arguments:
             confidence_level: the confidence level to determine the F-statistic, given as e.g. 0.95
-            xgrid: grid of x parameter values for the error surface
-            ygrid: grid of y parameter values for the error surface
-            zgrid: grid of the fit quality values (e.g. RSS) defining the error surface contours
+            x: array of x parameter values for the error surface
+            y: array of y parameter values for the error surface
+            z: array of the fit quality values (e.g. RSS) defining the error surface contours
 
         Returns:
-            F-value: float
-            confidence_contour: dict containing x, y, and z values that define the set of parameters giving curve fits that are statistically indistinguishable from the best fit. x,y pairs can be plotted on the error surface to define the confidence contour.
+            confidence_points: list of x, y values matching z values <= the critical RSS value
+            confidence_hull: object that defines the convex hull for the sets of parameters giving curve fits that are statistically indistinguishable from the best fit. 
+                            Used to plot a confidence contour on the error surface.
         """
 
         F_crit = f.ppf(confidence_level, dof_num, dof_den)
         RSS_crit = self.minimizer_result.chisqr*(F_crit*(dof_num/dof_den) + 1)
 
-        # First get x,y coordinates of all RSS values that are below the critical RSS
-        threshold_values = {'x':[],'y':[], 'z':[]}
-        for i in range(len(zgrid[:,0])):
-            for j in range(len(zgrid[0,:])):
-                if zgrid[i,j] <= RSS_crit:
-                    threshold_values['x'].append(xgrid[i,j])
-                    threshold_values['y'].append(ygrid[i,j])
-                    threshold_values['z'].append(zgrid[i,j])
-        
-        # Now find only the x,y coordinates that define the edges of the confidence contour, since above includes points within the contour as well
-        threshold_values_df = pd.DataFrame(threshold_values)
-        groups = threshold_values_df.groupby('x')
-        conf_cont = {'x':[], 'y':[], 'z':[]}
-        for ind, group in groups:
-            conf_cont['x'].append(ind)
-            conf_cont['x'].append(ind)
-            conf_cont['y'].append(group.y.iloc[0])
-            conf_cont['y'].append(group.y.iloc[-1])
-            conf_cont['z'].append(group.z.iloc[0])
-            conf_cont['z'].append(group.z.iloc[-1])
+        zind = np.argwhere(z <= RSS_crit)
+        xvals = [x[z[0]] for z in zind]
+        yvals = [y[z[0]] for z in zind]
+        contour_points = np.zeros((len(zind), 2))
+        for i, v in enumerate(zind):
+            contour_points[i] = np.array([xvals[i], yvals[i]])
+        try:
+            confidence_hull = ConvexHull(contour_points) # Convex hull defining the confidence contour
+        except:
+            print('Convex hull for confidence level contour could not be created, likely too few grid points in the input.')
+            print('Confidence hull set to None. Returning valid points for confidence contour.')
+            confidence_hull = None
 
-        return conf_cont
+        return contour_points, confidence_hull
 
     def monte_carlo_distributions(self, sample_name):
 
