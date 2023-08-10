@@ -12,7 +12,7 @@ from scipy.spatial import ConvexHull
 import time as tt
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
-from biophysics.plotting.plotting import make_pdf
+from biophysics.plotting import make_pdf
 import pickle
 import os
 import pyDOE as pyd
