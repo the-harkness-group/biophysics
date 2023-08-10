@@ -2,27 +2,31 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import pandas as pd
 from copy import deepcopy
 from lmfit import Parameters, minimize, report_fit, Minimizer
 from scipy.interpolate import griddata
 from scipy.stats import f
+from scipy.spatial import ConvexHull
 import time as tt
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
-from biophysics.plotting.plotting import make_pdf
+from biophysics.plotting import make_pdf
 import pickle
+import os
+import pyDOE as pyd
 
 class ErrorAnalysis:
 
-    def __init__(self, minimizer_result, monte_carlo_iterations=None, rmsd=None, range_factor=None, points=None):
+    def __init__(self, minimizer_result, monte_carlo_iterations=None, rmsd=None, points=None, monte_carlo_datasets=[]):
 
         self.minimizer_result = deepcopy(minimizer_result)
         self.opt_params = deepcopy(minimizer_result.params)
         self.monte_carlo_iterations = monte_carlo_iterations # For Monte carlo
         self.rmsd = rmsd
-        self.range_factor = range_factor # For correlation surfaces
         self.points = points
+        self.monte_carlo_datasets = monte_carlo_datasets
 
     @staticmethod
     def parameter_range(opt_param, stderr, num_points=20):
@@ -35,23 +39,27 @@ class ErrorAnalysis:
             print('Error supplied for generating parameter correlation range is larger than the parameter! Defaulting to param/1.3 <= param <= param*1.3...')
             opt_param_range = np.linspace(opt_param/1.3, opt_param*1.3, num_points)
         else:
-            opt_param_range = np.linspace(opt_param - 10*stderr, opt_param + 10*stderr, num_points)
+            opt_param_range = np.linspace(opt_param - 20*stderr, opt_param + 20*stderr, num_points)
             if opt_param_range[opt_param_range.argmin()] < 0:
                 print('The first value in the parameter correlation range is <0, defaulting to param/1.3 <= param <= param*1.3...')
                 opt_param_range = np.linspace(opt_param/1.3, opt_param*1.3, num_points)
 
         return opt_param_range
     
-    def correlation_pairs(self):
+    def correlation_pairs(self, params_to_correlate=None, optimize_other_params=False):
 
         self.correlation_pairs = {} # Big dictionary of all parameter pair combinations and their associated Parameters objects for passing to fitting routine
-        params_to_correlate = [k for k in self.opt_params.keys() if self.opt_params[k].vary == True]
+        #params_to_correlate = [k for k in self.opt_params.keys() if self.opt_params[k].vary == True]
         opt_params_copy = deepcopy(self.opt_params)
 
         for i in range(len(params_to_correlate) - 1): # Need to correlate ith parameter with only the parameters ahead of it, don't need to do last parameter because it gets done along the way
+            if self.opt_params[params_to_correlate[i]].stderr is None:
+                self.opt_params[params_to_correlate[i]].stderr = 0.01*self.opt_params[params_to_correlate[i]].value
             param_1_range = self.parameter_range(self.opt_params[params_to_correlate[i]].value, self.opt_params[params_to_correlate[i]].stderr, self.points)
 
             for j in range(i + 1, len(params_to_correlate)):
+                if self.opt_params[params_to_correlate[j]].stderr is None:
+                    self.opt_params[params_to_correlate[j]].stderr = 0.01*self.opt_params[params_to_correlate[j]].value
                 param_2_range = self.parameter_range(self.opt_params[params_to_correlate[j]].value, self.opt_params[params_to_correlate[j]].stderr, self.points)
                 self.correlation_pairs[f"{params_to_correlate[i]},{params_to_correlate[j]}"] = {f"{params_to_correlate[i]}":[], f"{params_to_correlate[j]}":[], "Parameter sets":[], "RSS":[], 'Fit results':[], 'Result order':[]}
 
@@ -64,11 +72,20 @@ class ErrorAnalysis:
                         opt_params_copy[params_to_correlate[j]].value = param_2
                         opt_params_copy[params_to_correlate[j]].vary = False
 
+                        if optimize_other_params == False: # DO NOT vary other parameters, this means that fit qualities will just be calculated for each parameter pair while the other parameters are fixed at the best fit values, i.e. NO FITTING!
+                            for p in opt_params_copy.keys():
+                                if p not in [params_to_correlate[i], params_to_correlate[j]]:
+                                    opt_params_copy[p].vary == False
+                        else: # DO vary the other parameters while the params being correlated are fixed, i.e. FITS WILL BE RUN!
+                            for p in opt_params_copy.keys():
+                                if p not in [params_to_correlate[i], params_to_correlate[j]]:
+                                    opt_params_copy[p].vary == True
+
                         self.correlation_pairs[f"{params_to_correlate[i]},{params_to_correlate[j]}"]["Parameter sets"].append(opt_params_copy) # Parallel fit results are not in the same order as this
 
                         opt_params_copy = deepcopy(self.opt_params)
     
-    def parameter_correlation_fits(self, **kwargs):
+    def parameter_correlation_fits(self, expt, sim, func):
 
         maxParallelProcesses = cpu_count()
         print('')
@@ -76,11 +93,10 @@ class ErrorAnalysis:
         start = tt.time()
         for param_pairs in self.correlation_pairs.keys():
             parameter_sets = self.correlation_pairs[param_pairs]['Parameter sets']
-
             with ProcessPoolExecutor(max_workers = maxParallelProcesses) as parallelExecution:
                 future_results = {}
                 for x in list(np.arange(len(parameter_sets))):
-                    future_result = parallelExecution.submit(self.parallel_fit_task, parameter_sets[x], **kwargs)
+                    future_result = parallelExecution.submit(self.parallel_fit_task, parameter_sets[x], expt, sim, func)
                     future_results[future_result] = x
                 for future in as_completed(future_results):
                     ax = future_results[future]
@@ -91,15 +107,21 @@ class ErrorAnalysis:
                     else:
                         print(f'Parameter pair {param_pairs} iteration {ax} completed.')
                         self.correlation_pairs[param_pairs]['Result order'].append(ax)
-                        self.correlation_pairs[param_pairs]['Fit results'].append(result.params)
-                        self.correlation_pairs[param_pairs]['RSS'].append(result.chisqr)
-                        self.correlation_pairs[param_pairs][param_pairs.split(',')[0]].append(result.params[param_pairs.split(',')[0]].value)
-                        self.correlation_pairs[param_pairs][param_pairs.split(',')[1]].append(result.params[param_pairs.split(',')[1]].value)
+                        # self.correlation_pairs[param_pairs]['Fit results'].append(result.params)
+                        # print(result.params)
+                        # self.correlation_pairs[param_pairs]['RSS'].append(result.chisqr)
+                        # self.correlation_pairs[param_pairs][param_pairs.split(',')[0]].append(result.params[param_pairs.split(',')[0]].value)
+                        # self.correlation_pairs[param_pairs][param_pairs.split(',')[1]].append(result.params[param_pairs.split(',')[1]].value)
+
+                        self.correlation_pairs[param_pairs]['Fit results'].append(result[0])
+                        self.correlation_pairs[param_pairs]['RSS'].append(result[1])
+                        self.correlation_pairs[param_pairs][param_pairs.split(',')[0]].append(result[0][param_pairs.split(',')[0]].value)
+                        self.correlation_pairs[param_pairs][param_pairs.split(',')[1]].append(result[0][param_pairs.split(',')[1]].value)
 
         end = tt.time()
-        print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
+        print(f"### Elapsed parameter correlation fit time: {end-start} s ###")
 
-    def monte_carlo_fits(self, **kwargs):
+    def monte_carlo_fits(self, expt, sim, objective):
 
         maxParallelProcesses = cpu_count()
         print('')
@@ -108,19 +130,19 @@ class ErrorAnalysis:
         with ProcessPoolExecutor(max_workers = maxParallelProcesses) as parallelExecution:
             future_results = {}
             for x in list(np.arange(1, self.monte_carlo_iterations + 1)):
-                future_result = parallelExecution.submit(self.monte_carlo_parallel_fit_task, self.opt_params, self.rmsd, **kwargs)
+                future_result = parallelExecution.submit(self.monte_carlo_parallel_fit_task, self.opt_params, self.rmsd, expt, sim, objective)
                 future_results[future_result] = x
             for future in as_completed(future_results):
                 ax = future_results[future]
                 try:
-                    result = future.result()
+                    result, monte_carlo_experiment = future.result()
                 except Exception as exc:
                     print('%r generated an exception: %s' % (ax, exc))
                 else:
                     print(f'Monte Carlo iteration {ax} completed.')
                     print(self.monte_carlo_parameters)
-                    print('Hyeaaaaaaaahhh')
                     {self.monte_carlo_parameters[k].append(result.params[k].value) for k in self.monte_carlo_parameters.keys()}
+                    self.monte_carlo_datasets.append(monte_carlo_experiment.data)
         end = tt.time()
         print(f"### Elapsed parameter correlation fit time was {end-start} s ###")
 
@@ -138,21 +160,23 @@ class ErrorAnalysis:
         self.monte_carlo_errors = {f"{k} error":None for k in self.opt_params.keys() if self.opt_params[k].vary == True}
 
     @staticmethod
-    def parallel_fit_task(initial_guess_params, min_method='leastsq', print_current_params=False, **kwargs): #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    def parallel_fit_task(initial_guess_params, expt, sim, func, min_method='leastsq', print_current_params=False): 
 
-        minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(kwargs, print_current_params))
+        #result = minimize(objective, initial_guess_params, method = min_method, args=(expt, sim, print_current_params))
+        result = func(initial_guess_params, expt, sim)
 
-        return minimizer_result
+        return initial_guess_params, result
     
     @staticmethod
-    def monte_carlo_parallel_fit_task(initial_guess_params, perfect_experiment, MT, ST, salt, objective, rmsd, min_method='leastsq', print_current_params=False):
+    def monte_carlo_parallel_fit_task(initial_guess_params, rmsd, perfect_experiment, sim, objective, min_method='leastsq', print_current_params=False):
 
         perturbed_experiment = deepcopy(perfect_experiment)
-        perturbed_experiment.Fluorescence = np.array(perturbed_experiment.Fluorescence) + np.random.RandomState().normal(scale=rmsd, size=(np.size(perturbed_experiment.Fluorescence, 0), 1))
-        perturbed_minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(perturbed_experiment, MT, ST, salt, print_current_params))
-        return perturbed_minimizer_result
+        # Add noise to "perfect" simulated best-fit data according to best-fit RMSD
+        perturbed_experiment.data.loc[:,perturbed_experiment.y] = perturbed_experiment.data.loc[:,perturbed_experiment.y] + np.random.RandomState().normal(scale=rmsd, size=len(perturbed_experiment.data.loc[:,perturbed_experiment.y]))
+        perturbed_minimizer_result = minimize(objective, initial_guess_params, method = min_method, args=(perturbed_experiment, sim, print_current_params))
+        return perturbed_minimizer_result, perturbed_experiment
 
-    def parameter_correlation_surfaces(self, sample_name):
+    def parameter_correlation_surfaces(self, sample_name, confidence_level, dof_num, dof_den):
 
         pdf = make_pdf(f"{sample_name}_parameter_correlation_surfaces.pdf")
         pair_groups = self.correlation_result_df.groupby('Parameter pair')
@@ -160,24 +184,31 @@ class ErrorAnalysis:
 
             x = group['Param 1 value'].values
             y = group['Param 2 value'].values
-            z = (group['RSS'].values - self.minimizer_result.chisqr)/self.minimizer_result.nfree ######## CHECK THAT THIS IS THE RIGHT NORMALIZATION!!!!
+            z = group['RSS'].values
+            contour_points, confidence_hull = self._calculate_confidence_contour(confidence_level, dof_num, dof_den, x, y, z)
 
             xgrid = np.reshape(x, (self.points, self.points))
             ygrid = np.reshape(y, (self.points, self.points))
-            zgrid = np.reshape(z, (self.points, self.points))
+            zgrid = np.reshape((z - self.minimizer_result.chisqr)/(dof_den), (self.points, self.points)) # Reduced delta RSS
 
             fig, ax = plt.subplots(1, 1)
-            a = ax.contourf(xgrid, ygrid, zgrid, levels=100, cmap='rainbow')
-            cbar = fig.colorbar(a)
+            a = ax.contourf(xgrid, ygrid, zgrid, levels=200, cmap='turbo')
+            if confidence_hull is not None:
+                for simplex in confidence_hull.simplices:
+                    ax.plot(contour_points[simplex, 0], contour_points[simplex, 1], 'w', linewidth=1, linestyle='dashed')
+            else:
+                for xy in contour_points: # Confidence hull was not created due to too few points, plot outline points only
+                    ax.plot(xy[0], xy[1], 'o', markersize=2, mec='k', mfc='w')
+            ax.plot(self.opt_params[ind.split(',')[0]].value, self.opt_params[ind.split(',')[1]].value, 'X', markersize=10, mew=1, mec='k', mfc='w')
+            cbar = fig.colorbar(a, format='%.1d')
             cbar.ax.set_title('$\Delta$RSS$_{red.}$', pad=10)
             x_label = ind.split(',')[0]
             y_label = ind.split(',')[1]
             ax.set_xlabel(x_label)
             ax.set_ylabel(y_label)
             fig.tight_layout()
-            pdf.savefig(fig)
+            pdf.savefig(fig, bbox_inches='tight')
             plt.close()
-
         pdf.close()
 
     def parameter_confidence_interval_surfaces(self, sample_name):
@@ -213,6 +244,39 @@ class ErrorAnalysis:
             plt.close()
 
         pdf.close()
+
+    def _calculate_confidence_contour(self, confidence_level:float, dof_num:int, dof_den:int, x:np.ndarray, y:np.ndarray, z:np.ndarray):
+        """ Determines the the confidence contour for a model fit using the value of the F distribution with a given confidence level.
+        
+        Arguments:
+            confidence_level: the confidence level to determine the F-statistic, given as e.g. 0.95
+            x: array of x parameter values for the error surface
+            y: array of y parameter values for the error surface
+            z: array of the fit quality values (e.g. RSS) defining the error surface contours
+
+        Returns:
+            confidence_points: list of x, y values matching z values <= the critical RSS value
+            confidence_hull: object that defines the convex hull for the sets of parameters giving curve fits that are statistically indistinguishable from the best fit. 
+                            Used to plot a confidence contour on the error surface.
+        """
+
+        F_crit = f.ppf(confidence_level, dof_num, dof_den)
+        RSS_crit = self.minimizer_result.chisqr*(F_crit*(dof_num/dof_den) + 1)
+
+        zind = np.argwhere(z <= RSS_crit)
+        xvals = [x[z[0]] for z in zind]
+        yvals = [y[z[0]] for z in zind]
+        contour_points = np.zeros((len(zind), 2))
+        for i, v in enumerate(zind):
+            contour_points[i] = np.array([xvals[i], yvals[i]])
+        try:
+            confidence_hull = ConvexHull(contour_points) # Convex hull defining the confidence contour
+        except:
+            print('Convex hull for confidence level contour could not be created, likely too few grid points in the input.')
+            print('Confidence hull set to None. Returning valid points for confidence contour.')
+            confidence_hull = None
+
+        return contour_points, confidence_hull
 
     def monte_carlo_distributions(self, sample_name):
 
@@ -265,26 +329,35 @@ class ErrorAnalysis:
             monte_carlo_dict['Error'].append(self.monte_carlo_errors[k2])
         monte_carlo_df = pd.DataFrame(monte_carlo_dict)
         monte_carlo_df.to_csv(f"{sample_name}_MonteCarlo_errors_{self.monte_carlo_iterations}_iterations.csv", index=False)
-        self.monte_carlo_result_df = monte_carlo_df
+
+        if os.path.exists('./monte_carlo_datasets'):
+            for i, df in enumerate(self.monte_carlo_datasets):
+                df.to_csv(f'./monte_carlo_datasets/monte_carlo_dataset_{i}.csv')
+        else:
+            os.mkdir('./monte_carlo_datasets')
+            for i, df in enumerate(self.monte_carlo_datasets):
+                df.to_csv(f'./monte_carlo_datasets/monte_carlo_dataset_{i}.csv')
+
+        self.monte_carlo_error_df = monte_carlo_df
 
 class InitialParameterExplorer:
     """ Used to explore the influence of initial parameter values on the final fit quality in an optimization routiine, i.e., verify that the final result is the global and not a local minimum.
         Implements latin hypercube sampling to draw appropriately spaced sets of parameters for use as different initial conditions in minimization routines with the lmfit package.
     
     Attributes:
-        param_names: (list) names of parameters used in the optimization routine
+        params: (object) lmfit Parameters object containing initial values and constraints (e.g. min/max values, vary=True/False, etc.) that will be updated with each round of new initial parameters to explore.
         num_params: (int) number of parameters
         num_samples: (int) number of parameter samples
-        param_bounds: (list) list of parameter bound lists, first and last elements of each list are lower and upper parameter bounds respectively
+        param_bounds: (list)
         lhs_criterion: (str) criterion for latin hypercube sampling, default is None so that points are randomly distributed in their intervals, can also be 'center', 'cm', 'maximin', 'centermaximin', or 'correlation'
         objective: (callable) the objective function containing the expression to be minimized
         objective_args: (tuple) additional arguments for the objective function
         minimizer_method: (str) optimization algorithm used by lmfit
     """
 
-    def __init__(self, param_names:list, num_params:int, num_samples:int, param_bounds:list, objective:callable, objective_args:tuple, lhs_criterion=None, minimizer_method='leastsq'):
+    def __init__(self, params:object, num_params:int, num_samples:int, param_bounds:list, objective:callable, objective_args:tuple, lhs_criterion=None, minimizer_method='leastsq'):
 
-        self.param_names = param_names
+        self.params = params
         self.num_params = num_params
         self.num_samples = num_samples
         self.param_bounds = param_bounds
@@ -300,7 +373,6 @@ class InitialParameterExplorer:
             The parameters within each set (list) are scaled (using a log10 scale) according to parameter boundaries supplied to the class object upon instantiation.
         """
 
-        import pyDOE as pyd
         lhs_params = pyd.lhs(self.num_params, self.num_samples, self.lhs_criterion)
 
         def scale_lhs_params():
@@ -328,6 +400,17 @@ class InitialParameterExplorer:
 
         return params
     
+    def _update_parameter_values(self, param_values:list):
+        """ Updates lmfit Parameters object with new initial values for passing to the minimizer. Parameter constraints, e.g. min and vary values remain the same.
+
+            Arguments:
+                param_values: (list) values of the parameters to be updated in the Parameters object. Values should be in the same order as the keys of the Parameters object dictionary.
+        
+        """
+
+        for i, k in enumerate(self.params.keys()):
+            self.params[k].value = param_values[i]
+    
     def optimize_initial_parameters(self):
         """ Iterates over parameter sets obtained from latin hypercube sampling and performs fits. Stores optimal parameters and the fit quality from each iteration,
             saves a csv file of the result parameter values and their associated fit qualities, and finally prints the optimal fit quality and parameter set for the user.
@@ -335,13 +418,24 @@ class InitialParameterExplorer:
 
         fit_qualities = []
         opt_params = []
-        for x in self.lhs_params:
-            params = self._make_parameter_object(x)
-            minimizer_result = minimize(self.objective, params, method=self.minimizer_method, args=self.args)
-            opt_params.append(minimizer_result.params)
-            fit_qualities.append(minimizer_result.chisqr)
+        for i, x in enumerate(self.lhs_params):
+            self._update_parameter_values(x)
+            print(f'Initializing parameter explorer fit {i} with params:')
+            for k in self.params.keys():
+                print(f"{k}: {self.params[k].value}")
+            try:
+                minimizer_result = minimize(self.objective, self.params, method=self.minimizer_method, args=self.args)
+                opt_params.append(minimizer_result.params)
+                fit_qualities.append(minimizer_result.chisqr)
+                print(f'Initial parameter explorer fit {i} completed.')
+                print(f'RSS: {minimizer_result.chisqr}\n')
+            except:
+                print(f'Parameter explorer fit {i} failed.')
+                print('Storing fit quality for this set of parameters as very poor, RSS = 1e32\n')
+                opt_params.append(self.params)
+                fit_qualities.append(1e32)
 
-        save_dict = {param_name:[] for param_name in self.param_names}
+        save_dict = {param_name:[] for param_name in self.params.keys()}
         save_dict['Fit quality'] = []
         for x, y in zip(opt_params, fit_qualities):
             for p in x:
@@ -356,46 +450,3 @@ class InitialParameterExplorer:
         print(f'The optimal starting parameters for your fit, with the minimum final RSS = {self.best_fit}, are:')
         for k in self.best_params.keys():
             print(f"{k}: {self.best_params[k].value}")
-
-
-######################### old mc errors that is used by some scripts #####################################
-
-def montecarloerrors(fit_data, opt_params, fit_constants, wrapper_func, wrapper_args, observe, MC_iter, RMSD, MC_objective, method='nelder'):
-    
-    perfect_data = fit_data.copy() # Make copy of dataframe
-
-    for x in range(len(perfect_data)): # Generate best fit data
-
-        observable = np.array(wrapper_func(opt_params, wrapper_args, perfect_data.Temperature.iloc[x], 
-        perfect_data.Concentration.iloc[x]))
-        perfect_data.loc[(perfect_data.Temperature == perfect_data.Temperature.iloc[x]) &
-        (perfect_data.Concentration == perfect_data.Concentration.iloc[x]), observe] = observable
-
-    MC_dict = {k:[] for k in opt_params.keys()} # Make dictionary for Monte Carlo parameters
-    errors = {k+' error':[] for k in MC_dict.keys()} # Make dictionary for errors
-    
-    # Serial implementation
-    counter = 1
-    for x in range(MC_iter):
-
-        print(f"######### The current Monte-Carlo iteration is: {counter} #########")
-
-        perturbed_data = perfect_data.copy() # Copy perfect data groups
-        perturbed_data[observe] = perturbed_data[observe] + np.random.normal(scale=RMSD, size=np.size(perturbed_data[observe])) # Perturb perfect data for MC analysis
-
-        perturbed_result = minimize(MC_objective, opt_params, method, args=(perturbed_data, 
-        wrapper_func, wrapper_args, observe))
-        {MC_dict[k].append(perturbed_result.params[k]) for k in perturbed_result.params.keys()}
-
-        counter = counter + 1
-
-    for k in MC_dict.keys():
-        errors[k+' error'].append(np.std(MC_dict[k]))
-
-    for k1,k2 in zip(opt_params.keys(),errors.keys()):
-        print(f"{k1} = {opt_params[k1].value} +/- {errors[k2][0]}")
-        
-    with open(f"MC_parameter_dictionary_{MC_iter}iterations_{fit_data.Sample.iloc[0]}_serial.pickle",'wb') as f:
-        pickle.dump(MC_dict,f,protocol=pickle.HIGHEST_PROTOCOL)
-    
-    return MC_dict, errors

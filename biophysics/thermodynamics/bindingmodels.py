@@ -22,19 +22,11 @@ def onesite(LT, PT, K):
     
     return PB
 
-# !!! Need to add these models
-def monomerdimer(PT, K):
+def monomerdimer(PT, K, n):
 
-    concentrations = 0
+    monomer = (-n + np.sqrt(n**2 + 4*2*n*K*PT))/(4*n*K)
 
-    return concentrations
-
-# !!!
-def monomerdimertrimer(PT, K1, K2):
-
-    concentrations = 0
-
-    return concentrations
+    return monomer
 
 # Solve roots of binding  polynomial and return the real, positive root as the desired experimental concentration
 def solveroots(p, max_concentration, concentration=None):

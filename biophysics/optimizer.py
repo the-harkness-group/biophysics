@@ -78,22 +78,19 @@ def fit(fit_data, fit_params, fit_constants, wrapper_func, wrapper_args, observe
 
     return fit_params, MC_dict, MC_errors
 
-# Minimization function for more complex fitting fitting
-def objective(fit_params, fit_data, wrapper_func, wrapper_args, observe, print_fit=False):
+# Minimization function for more complex fitting
+def objective(params, expt, sim, print_current_params=False):
 
-    resid = []
-    for x in range(len(fit_data)):
-
-        observable = np.array(wrapper_func(fit_params, wrapper_args, fit_data.Temperature.iloc[x], 
-        fit_data.Concentration.iloc[x]))
-        resid.append(np.array(fit_data[observe].iloc[x]) - observable)
-
-    if print_fit is True:
-        print('################ CURRENT FIT PROGRESS #####################')
-        print(fit_params)
-        print(np.sum(np.square(resid)))
-        print('\n')
-
+    sim.set_function_args('model', params=params)
+    sim.evaluate_function('model', 'model_result')
+    sim.set_function_args('observable', model_df=sim.model_result, fit_params=params)
+    sim.evaluate_function('observable', 'simulated_data')
+    resid = expt.data[expt.y].values - sim.simulated_data[sim.y].values
+    
+    if print_current_params is True:
+        print("RSS:",np.sum(np.square(resid)))
+        params.pretty_print(fmt='e',colwidth=12,columns=['value'])
+    
     return resid
 
 # Minimization function for fitting, scale residual,i by data,i
@@ -108,3 +105,13 @@ def scaled_objective(fit_params, fit_data, wrapper_func, wrapper_args, observe):
         /fit_data[observe].iloc[x]))
         
     return resid
+
+def rss(params, expt, sim):
+
+    sim.set_function_args('model', params=params)
+    sim.evaluate_function('model', 'model_result')
+    sim.set_function_args('observable', model_df=sim.model_result, fit_params=params)
+    sim.evaluate_function('observable', 'simulated_data')
+    rss = np.sum(np.square(expt.data[expt.y].values - sim.simulated_data[sim.y].values))
+
+    return rss
